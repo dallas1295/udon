@@ -30,3 +30,15 @@ func (s *Store) Init() error {
 
 	return nil
 }
+
+func (s *Store) GetNotes() error {
+}
+
+func (s *Store) Save() error {
+}
+
+func (s *Store) Delete() error {
+}
+
+func (s *Store) Update() error {
+}
