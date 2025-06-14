@@ -1,10 +1,12 @@
 package notes
 
 import (
+	"bufio"
 	"fmt"
 	"os"
 	"os/user"
 	"path/filepath"
+	"strings"
 )
 
 type Store struct {
@@ -33,7 +35,66 @@ func (s *Store) Init() error {
 }
 
 // Retrieve the notes from the storage directory
-func (s *Store) GetNotes() error {
+func (s *Store) GetNotes() ([]Note, error) {
+	entries, err := os.ReadDir(s.notesDir)
+	if err != nil {
+		fmt.Printf("Error retrieving notes from directory: %v", err)
+		return nil, err
+	}
+
+	var notes []Note
+
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+
+		var note Note
+		var content []string
+
+		// Get note modified time from file for sorting
+		info, err := entry.Info()
+		if err != nil {
+			fmt.Printf("Error reading file %s: %v\n", entry.Name(), err) // output the erroneous file rea
+			continue                                                     // skipping unreadable files
+		}
+
+		modTime := info.ModTime().Local()
+
+		// Get note name from filename
+		filename := entry.Name()
+		name := strings.TrimSuffix(filename, ".txt")
+
+		// Get note content
+		path := filepath.Join(s.notesDir, entry.Name())
+		file, err := os.Open(path)
+		if err != nil {
+			fmt.Printf("Error opening file %s: %v\n", filename, err) // output which files cannot be opened
+			continue                                                 // skipping unreadable files
+		}
+
+		// Get note content from inside the file
+		scanner := bufio.NewScanner(file)
+		for scanner.Scan() {
+			content = append(content, scanner.Text())
+		}
+		if err := scanner.Err(); err != nil {
+			fmt.Printf("Error reading file %s: %v\n", filename, err) // output the erroneous file read
+			file.Close()
+			continue
+		}
+
+		// Output information for our function
+		note.ModTime = modTime
+		note.Title = name
+		note.Body = strings.Join(content, "\n")
+		notes = append(notes, note)
+
+		// Close the files
+		file.Close()
+	}
+
+	return notes, nil
 }
 
 // Save note into the storage directory
