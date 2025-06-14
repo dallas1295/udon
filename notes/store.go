@@ -12,6 +12,7 @@ type Store struct {
 }
 
 // TODO Take a look at permissions and path for notes (I'm not a big fan of storage in Documents)
+// Initialize the directory needed by udon to store notes.
 func (s *Store) Init() error {
 	// Get home directory
 	usr, err := user.Current()
@@ -31,12 +32,15 @@ func (s *Store) Init() error {
 	return nil
 }
 
+// Retrieve the notes from the storage directory
 func (s *Store) GetNotes() error {
 }
 
+// Save note into the storage directory
 func (s *Store) Save() error {
 }
 
+// Delete the note from the storage directory
 func (s *Store) Delete() error {
 }
 
