@@ -5,9 +5,7 @@ import (
 )
 
 type Note struct {
-	ID        int64
-	Title     string
-	Body      string
-	CreatedAt *time.Time
-	UpdatedAt *time.Time
+	Title   string
+	Body    string
+	ModTime time.Time
 }
