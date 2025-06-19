@@ -1,3 +1,4 @@
+// Package notes is for creating storage and business logic for notes
 package notes
 
 import (
