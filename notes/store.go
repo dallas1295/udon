@@ -1,42 +1,50 @@
-// Package notes is for creating storage and business logic for notes
 package notes
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"os"
 	"os/user"
 	"path/filepath"
+	"regexp"
+	"sort"
 	"strings"
 	"time"
 	"unicode"
 )
 
+// Note represents a single note with a title, content, and modification time.
 type Note struct {
 	Title   string
 	Content string
 	ModTime time.Time
 }
 
+// Store manages the storage and retrieval of notes from the filesystem.
 type Store struct {
 	notesDir string
 }
 
+// sanitizeFilename replaces invalid filename characters with underscores.
+func sanitizeFilename(name string) string {
+	// invalidFilenameChars is a regexp for characters not allowed in filenames.
+	invalidFilenameChars := regexp.MustCompile(`[<>:"/\\|?*]`)
+
+	return invalidFilenameChars.ReplaceAllString(name, "_")
+}
+
 // Init initializes the storage directory. If the directory does not exist, it creates one.
 func (s *Store) Init() error {
-	// Get the current user's home directory.
 	usr, err := user.Current()
 	if err != nil {
-		return nil
+		return fmt.Errorf("could not get current user: %w", err)
 	}
 
-	// Set the path where notes will be stored.
-	// TODO: Allow user configuration for storage location.
 	s.notesDir = filepath.Join(usr.HomeDir, "Documents", "udon")
 
-	// Create the notes directory if it does not exist.
 	if err := os.MkdirAll(s.notesDir, 0755); err != nil {
-		fmt.Printf("There was an error creating note path: %s", err)
+		return fmt.Errorf("error creating note path: %w", err)
 	}
 
 	return nil
@@ -45,137 +53,141 @@ func (s *Store) Init() error {
 // GetNotes retrieves all notes from the storage directory.
 // It returns a slice of Note and any error encountered during retrieval.
 func (s *Store) GetNotes() ([]Note, error) {
-	// Read all entries in the notes directory.
 	entries, err := os.ReadDir(s.notesDir)
 	if err != nil {
-		fmt.Printf("Error retrieving notes from directory: %v", err)
-		return nil, err
+		return nil, fmt.Errorf("error reading notes directory: %w", err)
 	}
 
 	var notes []Note
 
 	for _, entry := range entries {
-		// Skip directories; only process files.
 		if entry.IsDir() {
 			continue
 		}
 
-		var note Note
-		var content []string
-
-		// Retrieve file metadata for modification time.
-		info, err := entry.Info()
-		if err != nil {
-			fmt.Printf("Error reading file info for %s: %v\n", entry.Name(), err)
-			continue // Skip files with unreadable metadata.
-		}
-		modTime := info.ModTime().Local()
-
-		// Extract the note title from the filename.
 		filename := entry.Name()
-		name := strings.TrimSuffix(filename, ".txt")
+		if filepath.Ext(filename) != ".md" {
+			continue // Only process .md files
+		}
 
-		// Build the full path to the note file.
-		path := filepath.Join(s.notesDir, entry.Name())
+		name := strings.TrimSuffix(filename, ".md")
+		path := filepath.Join(s.notesDir, filename)
 
-		// Open the note file for reading.
 		file, err := os.Open(path)
 		if err != nil {
-			fmt.Printf("Error opening file %s: %v\n", filename, err)
-			continue // Skip files that cannot be opened.
+			// Skip files that cannot be opened, but continue processing others
+			continue
 		}
 
-		// Read the note content line by line.
+		var content []string
 		scanner := bufio.NewScanner(file)
 		for scanner.Scan() {
 			content = append(content, scanner.Text())
 		}
-		// Handle any scanning errors.
-		if err := scanner.Err(); err != nil {
-			fmt.Printf("Error reading file %s: %v\n", filename, err)
-			file.Close()
-			continue
+		file.Close()
+
+		info, err := entry.Info()
+		if err != nil {
+			continue // Skip files with unreadable metadata
 		}
 
-		// Populate the Note struct with file data.
-		note.ModTime = modTime
-		note.Title = name
-		note.Content = strings.Join(content, "\n")
+		note := Note{
+			Title:   name,
+			Content: strings.Join(content, "\n"),
+			ModTime: info.ModTime().Local(),
+		}
 		notes = append(notes, note)
-
-		// Close the file after reading.
-		file.Close()
 	}
 
+	sort.Slice(notes, func(i, j int) bool {
+		return notes[i].ModTime.After(notes[j].ModTime)
+	})
+
 	return notes, nil
+}
+
+// Load retrieves a single note by title.
+// Returns a pointer to the Note and any error encountered.
+func (s *Store) Load(title string) (*Note, error) {
+	filename := sanitizeFilename(strings.TrimSpace(title)) + ".md"
+	path := filepath.Join(s.notesDir, filename)
+
+	content, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, fmt.Errorf("note %q does not exist", title)
+		}
+		return nil, fmt.Errorf("error reading note %q: %w", title, err)
+	}
+
+	info, err := os.Stat(path)
+	if err != nil {
+		return nil, fmt.Errorf("error getting file info for %q: %w", title, err)
+	}
+
+	return &Note{
+		Title:   title,
+		Content: string(content),
+		ModTime: info.ModTime().Local(),
+	}, nil
 }
 
 // Save writes the given note to the storage directory.
 // It trims trailing whitespace from the note content before saving.
 func (s *Store) Save(note Note) error {
-	// Build the filename from the note's title.
-	filename := strings.TrimSpace(note.Title) + ".txt"
-
-	// Remove trailing whitespace from the note content.
+	if strings.TrimSpace(note.Title) == "" {
+		return errors.New("note title cannot be empty")
+	}
+	filename := sanitizeFilename(strings.TrimSpace(note.Title)) + ".md"
 	content := strings.TrimRightFunc(note.Content, unicode.IsSpace)
-
-	// Build the full path for the note file.
 	path := filepath.Join(s.notesDir, filename)
 
-	// Write the note content to the file.
-	err := os.WriteFile(path, []byte(content), 0644)
-	if err != nil {
-		fmt.Printf("Could not save note w/ error: %v", err)
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		return fmt.Errorf("could not save note: %w", err)
 	}
-
 	return nil
 }
 
 // Delete removes the note with the specified name from the storage directory.
-// If the note does not exist, Delete prints a message and returns an error.
+// If the note does not exist, Delete returns an error.
 func (s *Store) Delete(noteName string) error {
-	// Build the full path to the note file.
-	filename := strings.TrimSpace(noteName) + ".txt"
+	if strings.TrimSpace(noteName) == "" {
+		return errors.New("note name cannot be empty")
+	}
+	filename := sanitizeFilename(strings.TrimSpace(noteName)) + ".md"
 	toDelete := filepath.Join(s.notesDir, filename)
 
-	// Attempt to remove the note file.
 	err := os.Remove(toDelete)
 	if err != nil {
-		// If the file does not exist, print a message.
 		if os.IsNotExist(err) {
-			fmt.Printf("A note with the name %s doesn't exist\n", noteName)
+			return fmt.Errorf("note %q does not exist", noteName)
 		}
-		// Print any other error encountered during deletion.
-		fmt.Printf("There was an error deleting this note: %v\n", err)
-		return err
+		return fmt.Errorf("error deleting note %q: %w", noteName, err)
 	}
-
 	return nil
 }
 
 // Update modifies the title and/or content of an existing note.
 // If both updatedTitle and updatedContent are nil, Update returns without making changes.
 func (s *Store) Update(oldTitle string, updatedTitle *string, updatedContent *string) error {
-	// Return early if there are no updates to apply.
+	if strings.TrimSpace(oldTitle) == "" {
+		return errors.New("old title cannot be empty")
+	}
 	if updatedTitle == nil && updatedContent == nil {
-		fmt.Printf("There are no updates for %s\n", oldTitle)
-		return nil
+		return nil // Nothing to update
 	}
 
-	// Build the path to the current note file.
-	filename := strings.TrimSpace(oldTitle) + ".txt"
-	path := filepath.Join(s.notesDir, filename)
+	oldFilename := sanitizeFilename(strings.TrimSpace(oldTitle)) + ".md"
+	oldPath := filepath.Join(s.notesDir, oldFilename)
+	path := oldPath
 
 	// Rename the note file if a new, non-empty title is provided.
 	if updatedTitle != nil && strings.TrimSpace(*updatedTitle) != "" {
-		updatedFilename := strings.TrimSpace(*updatedTitle) + ".txt"
-		newPath := filepath.Join(s.notesDir, updatedFilename)
-		err := os.Rename(path, newPath)
-		if err != nil {
-			fmt.Printf("There was an error renaming %s to %s: %v\n", oldTitle, *updatedTitle, err)
-			return err
+		newFilename := sanitizeFilename(strings.TrimSpace(*updatedTitle)) + ".md"
+		newPath := filepath.Join(s.notesDir, newFilename)
+		if err := os.Rename(oldPath, newPath); err != nil {
+			return fmt.Errorf("error renaming %q to %q: %w", oldTitle, *updatedTitle, err)
 		}
-		// Update the path to point to the renamed file.
 		path = newPath
 	}
 
@@ -183,18 +195,14 @@ func (s *Store) Update(oldTitle string, updatedTitle *string, updatedContent *st
 	if updatedContent != nil {
 		oldBytes, err := os.ReadFile(path)
 		if err != nil {
-			fmt.Printf("There was an error reading %s content: %v\n", path, err)
-			return err
+			return fmt.Errorf("error reading %q content: %w", path, err)
 		}
 		oldContent := string(oldBytes)
 		newContent := strings.TrimRightFunc(*updatedContent, unicode.IsSpace)
 
-		// Only write if the new content is different from the old content.
 		if newContent != oldContent {
-			err := os.WriteFile(path, []byte(newContent), 0644)
-			if err != nil {
-				fmt.Printf("There was an error writing new content to %s: %v\n", path, err)
-				return err
+			if err := os.WriteFile(path, []byte(newContent), 0644); err != nil {
+				return fmt.Errorf("error writing new content to %q: %w", path, err)
 			}
 		}
 	}
