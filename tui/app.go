@@ -1,3 +1,4 @@
+// Package tui provides a terminal user interface for managing and editing notes.
 package tui
 
 import (

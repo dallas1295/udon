@@ -1,40 +1,36 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/lipgloss"
 )
 
-// Gruvbox color palette
-const (
-	gruvBg     = "#282828"
-	gruvFg     = "#ebdbb2"
-	gruvYellow = "#fabd2f"
-	gruvOrange = "#fe8019"
-	gruvBlue   = "#83a598"
-	gruvAqua   = "#8ec07c"
-	gruvGreen  = "#b8bb26"
-	gruvRed    = "#fb4934"
-	gruvGray   = "#928374"
-)
+// statusStyle defines the appearance of the status pane (top bar)
+var statusStyle = lipgloss.NewStyle().
+	Background(lipgloss.Color(gruvYellow)).
+	Foreground(lipgloss.Color(gruvBg)).
+	MarginTop(1).
+	MarginRight(2).
+	MarginLeft(2)
 
 // listStyle defines the appearance of the notes list pane (left sidebar).
 var listStyle = lipgloss.NewStyle().
 	Border(lipgloss.RoundedBorder()).
-	BorderForeground(lipgloss.Color(gruvYellow)).
-	Background(lipgloss.Color(gruvBg)).
+	BorderForeground(lipgloss.Color(gruvGreen)).
 	Foreground(lipgloss.Color(gruvFg)).
-	Padding(1, 2)
+	Padding(2, 1).
+	MarginLeft(1)
 
 // editorStyle defines the appearance of the editor/preview pane (main area).
 var editorStyle = lipgloss.NewStyle().
 	Border(lipgloss.RoundedBorder()).
-	BorderForeground(lipgloss.Color(gruvBlue)).
-	Background(lipgloss.Color(gruvBg)).
+	BorderForeground(lipgloss.Color(gruvGreen)).
 	Foreground(lipgloss.Color(gruvFg)).
-	Padding(1, 2)
+	Padding(2, 1).
+	MarginRight(1)
 
 // glamourRenderer is a reusable Glamour renderer with Gruvbox theming.
 var glamourRenderer = func() *glamour.TermRenderer {
@@ -50,13 +46,12 @@ var glamourRenderer = func() *glamour.TermRenderer {
 // is the editor or preview pane. The layout is responsive to terminal resizing.
 func (m model) View() string {
 	if m.width == 0 {
-		// fallback for startup if window size hasn't been set yet
 		m.width = 80
 	}
-	listWidth := m.width / 3
-	editorWidth := m.width - listWidth - 1
+	listWidth := m.width/4 - 6
+	editorWidth := m.width - listWidth - editorStyle.GetHorizontalFrameSize() - 1
+	statusWidth := m.width - statusStyle.GetHorizontalFrameSize()
 
-	// Build the notes list pane (left sidebar)
 	var listContent strings.Builder
 	for i, n := range m.notes {
 		prefix := "  "
@@ -67,18 +62,15 @@ func (m model) View() string {
 	}
 	listPane := listStyle.Width(listWidth).Render(listContent.String())
 
-	// Build the editor/preview pane (main area)
 	var editorContent string
 	switch m.state {
 	case editorView:
-		// Show the textarea for editing the note
 		editorContent = m.textarea.View()
 	default:
-		// In listView (and any other state), show the content of the selected note rendered as Markdown
 		if len(m.notes) > 0 {
 			rendered, err := glamourRenderer.Render(m.notes[m.listIndex].Content)
 			if err != nil {
-				editorContent = m.notes[m.listIndex].Content // fallback to plain text
+				editorContent = m.notes[m.listIndex].Content
 			} else {
 				editorContent = rendered
 			}
@@ -88,6 +80,27 @@ func (m model) View() string {
 	}
 	editorPane := editorStyle.Width(editorWidth).Render(editorContent)
 
-	// Join the two panes horizontally to create the split layout
-	return lipgloss.JoinHorizontal(lipgloss.Top, listPane, editorPane)
+	statusLeft := "Status"
+	var rightStatus string
+	if m.state == editorView {
+		rightStatus = fmt.Sprintf("%s - Editing", m.currNote.Title)
+	} else {
+		rightStatus = fmt.Sprintf("%s - Preview", m.currNote.Title)
+	}
+	statusContent := lipgloss.JoinHorizontal(
+		lipgloss.Top,
+		statusLeft,
+		lipgloss.PlaceHorizontal(
+			statusWidth-lipgloss.Width(statusLeft),
+			lipgloss.Right,
+			rightStatus,
+		),
+	)
+	statusPane := statusStyle.Width(statusWidth).Render(statusContent)
+
+	return lipgloss.JoinVertical(
+		lipgloss.Left,
+		statusPane,
+		lipgloss.JoinHorizontal(lipgloss.Top, listPane, editorPane),
+	)
 }

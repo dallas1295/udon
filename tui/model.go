@@ -13,6 +13,7 @@ const (
 	listView uint = iota
 	editorView
 	previewView
+	statusView
 )
 
 type model struct {
@@ -95,7 +96,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		case previewView:
 			switch key {
-			case "e":
+			case "i":
 				m.textarea.SetValue(m.currNote.Content)
 				m.state = editorView
 				m.textarea.Focus()
